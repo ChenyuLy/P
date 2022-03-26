@@ -27,17 +27,17 @@ data = dict(
     workers_per_gpu=2,
     train=dict(
         type=dataset_type,
-        data_prefix='data/imagenet/train',
+        data_prefix='/home/czy/download/dataset/train',
         pipeline=train_pipeline),
     val=dict(
         type=dataset_type,
-        data_prefix='data/imagenet/val',
-        ann_file='data/imagenet/meta/val.txt',
+        data_prefix='/home/czy/project/data/1k',
+        ann_file='/home/czy/project/data/1k_lab/ILSVRC2012_devkit_t12/data/ILSVRC2012_validation_ground_truth.txt',
         pipeline=test_pipeline),
     test=dict(
         # replace `data/val` with `data/test` for standard test
         type=dataset_type,
-        data_prefix='data/imagenet/val',
-        ann_file='data/imagenet/meta/val.txt',
+        data_prefix='/home/czy/project/data/1k',
+        ann_file='/home/czy/project/data/1k_lab/ILSVRC2012_devkit_t12/data/ILSVRC2012_validation_ground_truth.txt',
         pipeline=test_pipeline))
 evaluation = dict(interval=1, metric='accuracy')

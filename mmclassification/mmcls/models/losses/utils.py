@@ -112,6 +112,7 @@ def convert_to_one_hot(targets: torch.Tensor, classes) -> torch.Tensor:
     Returns:
         Tensor: Processed loss values.
     """
+
     assert (torch.max(targets).item() <
             classes), 'Class Index must be less than number of classes'
     one_hot_targets = F.one_hot(
