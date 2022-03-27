@@ -106,10 +106,11 @@ def parse_args():
 
 
 def main():
-    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    os.environ["CUDA_VISIBLE_DEVICES"] = '0,1'
 
-    torch.backends.cudnn.enabled = False
-    torch.cuda.set_device(1)
+    #torch.backends.cudnn.enabled = False
+    #torch.cuda.set_device(1)
 
     args = parse_args()
     cfg = mmcv.Config.fromfile(args.config)
@@ -183,6 +184,7 @@ def main():
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir,
                                   **show_kwargs)
     else:
+        print(torch.cuda.current_device())
         model = MMDistributedDataParallel(
             model.cuda(),
             device_ids=[torch.cuda.current_device()],

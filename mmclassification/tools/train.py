@@ -173,6 +173,7 @@ def main():
             CLASSES=datasets[0].CLASSES))
 
     # add an attribute for visualization convenience
+    print(args.device)
     train_model(
         model,
         datasets,
