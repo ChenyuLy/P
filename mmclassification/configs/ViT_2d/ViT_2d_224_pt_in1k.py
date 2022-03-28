@@ -1,7 +1,7 @@
 _base_ = [
     '../_base_/models/ViT_2db.py',
     '../_base_/datasets/imagenet_bs64_pil_resize_autoaug.py',
-    '../_base_/schedules/imagenet_bs4096_AdamW.py',
+    '../_base_/schedules/imagenet_custom.py',
     '../_base_/default_runtime.py'
 ]
 train_cfg=dict(
