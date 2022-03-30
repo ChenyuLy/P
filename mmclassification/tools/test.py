@@ -106,11 +106,11 @@ def parse_args():
 
 
 def main():
-    # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+    os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
     os.environ["CUDA_VISIBLE_DEVICES"] = '0,1'
 
-    #torch.backends.cudnn.enabled = False
-    #torch.cuda.set_device(1)
+    # torch.backends.cudnn.enabled = False
+    torch.cuda.set_device(1)
 
     args = parse_args()
     cfg = mmcv.Config.fromfile(args.config)
