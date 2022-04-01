@@ -21,15 +21,15 @@ data = dict(
     samples_per_gpu=16,
     workers_per_gpu=2,
     train=dict(
-        type=dataset_type, data_prefix='data/cifar10',
+        type=dataset_type, data_prefix='/home/czy/download/dataset',
         pipeline=train_pipeline),
     val=dict(
         type=dataset_type,
-        data_prefix='data/cifar10',
+        data_prefix='/home/czy/download/dataset',
         pipeline=test_pipeline,
         test_mode=True),
     test=dict(
         type=dataset_type,
-        data_prefix='data/cifar10',
+        data_prefix='/home/czy/download/dataset',
         pipeline=test_pipeline,
         test_mode=True))

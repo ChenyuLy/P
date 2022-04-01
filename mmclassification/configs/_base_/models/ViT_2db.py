@@ -2,8 +2,11 @@
 model = dict(
     type='ImageClassifier',
     backbone=dict(
-        type='Vison_transformer'),
-    neck=None,
+        type='vision_2dtransformer'),
+    neck=dict(
+        type='GlobalAveragePooling',
+        dim=2,
+    ),
     head=dict(
         type='LinearClsHead',
         num_classes=1000,

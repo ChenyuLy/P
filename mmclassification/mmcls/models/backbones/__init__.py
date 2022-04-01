@@ -27,7 +27,7 @@ from .tnt import TNT
 from .twins import PCPVT, SVT
 from .vgg import VGG
 from .vision_transformer import VisionTransformer
-from .ViT_2d import Vison_transformer
+from .ViT_2d import vision_2dtransformer
 
 __all__ = [
     'LeNet5', 'AlexNet', 'VGG', 'RegNet', 'ResNet', 'ResNeXt', 'ResNetV1d',
@@ -35,5 +35,5 @@ __all__ = [
     'ShuffleNetV2', 'MobileNetV2', 'MobileNetV3', 'VisionTransformer',
     'SwinTransformer', 'TNT', 'TIMMBackbone', 'T2T_ViT', 'Res2Net', 'RepVGG',
     'Conformer', 'MlpMixer', 'DistilledVisionTransformer', 'PCPVT', 'SVT',
-    'EfficientNet', 'ConvNeXt', 'HRNet', 'ResNetV1c','Vison_transformer'
+    'EfficientNet', 'ConvNeXt', 'HRNet', 'ResNetV1c','vision_2dtransformer'
 ]

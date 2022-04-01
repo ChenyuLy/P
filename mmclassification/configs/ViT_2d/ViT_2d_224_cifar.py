@@ -1,12 +1,30 @@
 _base_ = [
     '../_base_/models/ViT_2db.py',
-    '../_base_/datasets/imagenet_bs64_pil_resize_autoaug.py',
-    '../_base_/schedules/imagenet_custom.py',
+    '../_base_/datasets/cifar10_bs16.py',
+    '../_base_/schedules/cifar10_bs128.py',
     '../_base_/default_runtime.py'
 ]
-train_cfg=dict(
-        augments=dict(type='BatchMixup', alpha=0.2, num_classes=1000,
-                      prob=1.))
+model = dict(
+    type='ImageClassifier',
+    backbone=dict(
+        type='vision_2dtransformer',
+        img_size=32,
+        # patch_size=4
+    ),
+    neck=None,
+    head=dict(
+        type='LinearClsHead',
+        num_classes=10,
+        in_channels=768,
+        loss=dict(
+            type='LabelSmoothLoss', label_smooth_val=0.1, mode='original'),
+        topk=(1, 3),
+
+        init_cfg=dict(type='TruncNormal', layer='Linear', std=.02)))
+
+train_cfg = dict(
+    augments=dict(type='BatchMixup', alpha=0.2, num_classes=10,
+                  prob=1.))
 # img_norm_cfg = dict(
 #     mean=[127.5, 127.5, 127.5], std=[127.5, 127.5, 127.5], to_rgb=True)
 # train_pipeline = [

@@ -7,16 +7,16 @@ _base_ = [
 model = dict(
     type='ImageClassifier',
     backbone=dict(
-        type='Vison_transformer',
+        type='vision_2dtransformer',
         img_size=32, ),
     neck=None,
     head=dict(
         type='LinearClsHead',
-        num_classes=10,
+        num_classes=100,
         in_channels=768,
         loss=dict(
             type='LabelSmoothLoss', label_smooth_val=0.1, mode='original'),
-        topk=(1, 3),
+        topk=(1, 5),
 
         init_cfg=dict(type='TruncNormal', layer='Linear', std=.02)))
 

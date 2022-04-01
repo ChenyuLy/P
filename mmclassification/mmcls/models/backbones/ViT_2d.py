@@ -1,144 +1,81 @@
+import torch.nn as nn
+import torch
+from functools import partial
+
+from typing import Sequence
+
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from mmcv.cnn import build_norm_layer
 from mmcv.cnn.bricks.transformer import FFN, PatchEmbed
 from mmcv.cnn.utils.weight_init import trunc_normal_
 from mmcv.runner.base_module import BaseModule, ModuleList
-from functools import partial
+
 from mmcls.utils import get_root_logger
 from ..builder import BACKBONES
 from ..utils import MultiheadAttention, resize_pos_embed, to_2tuple
 from .base_backbone import BaseBackbone
 
-
-def _init_vit_weights(m):
-    """
-    ViT weight initialization
-    :param m: module
-    """
-    if isinstance(m, nn.Linear):
-        nn.init.trunc_normal_(m.weight, std=.01)
-        if m.bias is not None:
-            nn.init.zeros_(m.bias)
-    elif isinstance(m, nn.Conv2d):
-        nn.init.kaiming_normal_(m.weight, mode="fan_out")
-        if m.bias is not None:
-            nn.init.zeros_(m.bias)
-    elif isinstance(m, nn.LayerNorm):
-        nn.init.zeros_(m.bias)
-        nn.init.ones_(m.weight)
-
-
-def window_reverse(windows, window_size, H, W):
-    """
-    Args:
-        windows: (num_windows*B, window_size, window_size, C)
-        window_size (int): Window size
-        H (int): Height of image
-        W (int): Width of image
-
-    Returns:
-        x: (B, H, W, C)
-    """
-    B = int(windows.shape[0] / (H * W / window_size / window_size))
-    x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
-    x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
-    return x
-
-
-def window_partition(x, window_size):
-    """
-    Args:
-        x: (B, H, W, C)
-        window_size (int): window size
-
-    Returns:
-        windows: (num_windows*B, window_size, window_size, C)
-    """
-    B, H, W, C = x.shape
-    x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)  # 把分下来的小框口整合到了patch维度
-    return windows
-
-
-def Token_reduction(x, window_size, token_num):  # (8,14*14,16*16*3)
-    B, P, D = x.shape
-    x = x.reshape(B, token_num, token_num, window_size, window_size, 3).permute(0, 5, 1, 3, 2, 4)
-    x = x.reshape(B, 3, token_num * window_size, token_num * window_size)
-
-    return x
-
-
-class Patch_Embed(BaseBackbone):
-    def __init__(self, patch_size=16, image_size=224, cin_dim=3, embed_dim=768):
-        super(Patch_Embed, self).__init__()
-        self.img_size = (image_size, image_size)
-        self.patch_size = (patch_size, patch_size)
-        self.grid_size = (image_size // patch_size, image_size // patch_size)
-        self.proj = nn.Conv2d(cin_dim, embed_dim, self.patch_size, self.patch_size)
-        self.patches_num = self.grid_size[0] * self.grid_size[1]
+class Depthwise_conv(nn.Module):
+    "Depthwise conv + Pointwise conv"
+    def __init__(self, in_channels, out_channels,kernel_size, stride,padding):
+        super(Depthwise_conv, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, stride=stride, padding=padding, groups=in_channels, bias=False)
+        self.bn1 = nn.BatchNorm2d(in_channels)
+        self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
-        B, C, W, H = x.shape
-        assert H == self.img_size[0] and W == self.img_size[1], \
-            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        # flatten: [B, C, H, W] -> [B, C, HW]
-        # transpose: [B, C, HW] -> [B, HW, C] [B,patches_num ,embed_dim]
-        x = self.proj(x).flatten(2).transpose(1, 2)  # 经过一次卷积以后 输入图片的维度变为[batchsize ,patches_num , embed_dim]
-
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = F.relu(x)
         return x
 
 
-class Additon_conv2d(BaseBackbone):
-    def __init__(self, dim, window_size, token_num, hidden_rate=2, patch_embed=Patch_Embed):
-        super(Additon_conv2d, self).__init__()
-        self.window_size = window_size
-        self.token_num = token_num
-        self.conv1 = nn.Conv2d(dim, dim, kernel_size=7, padding=3)
-        # self.conv2 = nn.Conv2d(dim * 4, dim, kernel_size=7, padding=3)
-        self.patch_embed = patch_embed(patch_size=16, image_size=224, cin_dim=3, embed_dim=768)
+class MutiHeadAttentnion_2d(BaseBackbone):
+    def __init__(self, in_dim, out_dim, head_num=12, padding=(3, 3), stride=1, kernel_size=(7, 7)):
+        super(MutiHeadAttentnion_2d, self).__init__()
+        self.heads_num = head_num
+        self.heads_dim = in_dim // head_num
+        self.qk_scale = self.heads_dim ** -0.5
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.padding = padding
+        self.stride = stride
+        self.kernel = kernel_size
+        # self.proj_q = nn.Conv2d(self.in_dim, self.out_dim, self.kernel, self.stride, self.padding)
+        # self.proj_k = nn.Conv2d(self.in_dim, self.out_dim, self.kernel, self.stride, self.padding)
+        # self.proj_v = nn.Conv2d(self.in_dim, self.out_dim, self.kernel, self.stride, self.padding)
+        self.proj_q = Depthwise_conv(self.in_dim, self.out_dim, self.kernel, self.stride, self.padding)
+        self.proj_k = Depthwise_conv(self.in_dim, self.out_dim, self.kernel, self.stride, self.padding)
+        self.proj_v = Depthwise_conv(self.in_dim, self.out_dim, self.kernel, self.stride, self.padding)
+        self.softmax2d = nn.Softmax2d()
+        self.proj = nn.Linear(out_dim, out_dim)
 
     def forward(self, x):
-        cls, x_ = x.split((1, 196), dim=1)
-        x_ = Token_reduction(x_, window_size=self.window_size,
-                             token_num=self.token_num)
-        x_ = self.conv1(x_)
-        # x_ = self.conv2(x_)
-        x_ = self.patch_embed(x_)
-        x = torch.cat((cls, x_), dim=1)
-        return x
+        B, C, H, W = x.shape
+        # qkv [B,heads_num,heads_dim,h,w]
+        q = self.proj_q(x).reshape(B, self.heads_num, self.heads_dim, H, W)
+        k = self.proj_k(x).reshape(B, self.heads_num, self.heads_dim, H, W)
+        v = self.proj_v(x).reshape(B, self.heads_num, self.heads_dim, H, W)
 
-
-class Attention(BaseBackbone):
-    def __init__(self,
-                 dim,  # token的维数
-                 num_heads=12,
-                 ):
-        super(Attention, self).__init__()
-        self.heads_num = num_heads
-        self.head_dim = dim // num_heads
-        self.qk_scale = self.head_dim ** -0.5  # 后续做softmax时候用到
-        self.qkv = nn.Linear(dim, dim * 3, bias=True)
-        self.proj = nn.Linear(dim, dim)
-
-    def forward(self, x):
-        B, P, D = x.shape  # [batch,patch,dim] #每个头运算中 做运算的维度为 patch 和dim
-
-        qkv = self.qkv(x).reshape(B, P, 3, D // self.heads_num, self.heads_num).permute(2, 0, 4, 1, 3)
-        # qkv [batch,patch,3dim] -> [batch,patch,3,dim/head,head]->[3,batch,head,patch,dim-head]
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        # Q[patch,dim]@K[dim,patch]
-        atten = q @ k.transpose(-2, -1) * self.qk_scale
-        atten = atten.softmax(dim=-1)
-        x = (atten @ v).transpose(-2, -3).reshape(B, P,
-                                                  D)  # atten @ v    [batch,patch,head,dim-head][batch,patch,dim]
-        x = self.proj(x)
-        return x
+        # atten_2d = q @k.transpose(-2, -1) * self.qk_scale
+        atten_2d = torch.matmul(q, k.transpose(-2, -1)) * self.qk_scale
+        atten_2d = atten_2d.reshape(B * self.heads_num, self.heads_dim, H, W)
+        atten_2d = self.softmax2d(atten_2d)
+        atten_2d = atten_2d.reshape(B, self.heads_num, self.heads_dim, H, W)
+        x = torch.matmul(atten_2d, v).reshape(B, -1, H, W)
+        x = (self.proj(x.transpose(1, 3))).transpose(1, 3)
+        return x  # B,C,W,H
 
 
 class MLP(BaseBackbone):
-    def __init__(self, in_feature, out_feature=None, hidden_feature=None, nonLinear_func=nn.GELU, drop=0.):
+    def __init__(self, in_feature, out_feature=None, hidden_feature=None, nonLinear_func=nn.ReLU, drop=0.):
         super(MLP, self).__init__()
         self.drop = drop
         self.in_feature = in_feature
@@ -150,69 +87,128 @@ class MLP(BaseBackbone):
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
+        x = x.transpose(1, 3)
         x = self.fc1(x)
         x = self.activation(x)
         x = self.drop(x)
         x = self.fc2(x)
         x = self.drop(x)
+        x = x.transpose(1, 3)
         return x
 
 
-class Block(BaseModule):
+class Block(BaseBackbone):
     def __init__(self,
-                 dim,
-                 num_head=12,
+                 in_dim, out_dim, kernel_size=7, padding=(3, 3), stride=1, head_num=12,
                  mlp_hidden_ratio=4,
                  drop=0.,
                  norm_layer=nn.LayerNorm):
         super(Block, self).__init__()
-        self.norm1 = norm_layer(dim)
-        self.num_head = num_head
-        self.att_dim = dim
-        self.attn = Attention(dim=dim, num_heads=self.num_head)
-        self.mlp = MLP(in_feature=dim, hidden_feature=4 * mlp_hidden_ratio)
-        self.norm2 = norm_layer(dim)
-        self.addition_block = Additon_conv2d(3, 16, 14)
+        self.padd = padding
+        self.head_num = head_num
+        self.stride = stride
+        self.kernel = kernel_size
+
+        self.norm1 = norm_layer(in_dim)
+        self.num_head = head_num
+        self.att_dim = in_dim
+        self.after_att_dim = out_dim
+        # self.attn = MutiHeadAttentnion_2d(padding=padding, stride=stride, head_num=head_num, in_dim=self.att_dim,
+        #                                   out_dim=self.after_att_dim, kernel_size=kernel_size)
+        self.attn = MutiHeadAttentnion_2d(head_num=self.head_num, in_dim=self.att_dim, out_dim=self.after_att_dim,
+                                          padding=self.padd,
+                                          stride=self.stride)
+
+        self.mlp = MLP(in_feature=self.after_att_dim, hidden_feature=self.after_att_dim * mlp_hidden_ratio)
+        self.norm2 = norm_layer(self.after_att_dim)
 
     def forward(self, x):
-        x = x + self.addition_block(x)
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
+        x = x + self.attn((self.norm1(x.transpose(1, 3))).transpose(1, 3))
+        x = x + self.mlp((self.norm2(x.transpose(1, 3))).transpose(1, 3))
+        return x  # B,C,W,H
+
+
+class DownSample2x(BaseBackbone):
+    def __init__(self, in_channel, out_channel):
+        super(DownSample2x, self).__init__()
+        self.downsample = nn.Conv2d(in_channel, out_channel, stride=2, padding=1, kernel_size=3)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        x = self.downsample(x)
+        x = self.activation(x)
         return x
 
 
-@BACKBONES.register_module()
-class Vison_transformer(BaseBackbone):
-    def __init__(self, dim=768, depth=12, img_size=224, patch_size=16, in_c=3, num_classes=1000, embed_lay=Patch_Embed,
-                 num_heads=12,
-                 ):
-        super(Vison_transformer, self).__init__()
-        self.dim = dim
-        self.class_num = num_classes
-        self.depth = depth
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.in_c = in_c
-        self.Blocks = nn.Sequential(*[Block(dim=dim) for i in range(depth)])
-        self.Embed_lay = embed_lay(patch_size=patch_size, embed_dim=dim)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, self.Embed_lay.patches_num + 1, dim))
-        norm_layer = partial(nn.LayerNorm, eps=1e-6)
-        self.norm = norm_layer(self.dim)
-
-        # # 分类头
-        # self.head = nn.Linear(dim, num_classes)
-        nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
-        self.apply(_init_vit_weights)
+class Stem(BaseBackbone):
+    def __init__(self, kernelsize=4, strde=4, out_dim=96):
+        super(Stem, self).__init__()
+        self.proj1 = nn.Conv2d(3, out_channels=int(out_dim), stride=(strde, strde),
+                               kernel_size=(kernelsize, kernelsize))
+        self.activation = nn.ReLU()
 
     def forward(self, x):
-        x = self.Embed_lay(x)
-        cls_token = self.cls_token.expand(x.shape[0], -1, -1)
-        x = torch.cat((cls_token, x), dim=1)
-        x = x + self.pos_embed
-        x = self.Blocks(x)
+        x = self.proj1(x)
+        x = self.activation(x)
+        return x
 
-        x = self.norm(x)
-        # x = self.head(x)  # [B,num_patches+1,class]
-        return x[:, 0]
+
+class Stage(BaseBackbone):
+    def __init__(self, cin_dim, block_num=3, dim_hidden_rate=4, down_sample_rate=2, is_last_stage=False):
+        super(Stage, self).__init__()
+        self.Blocks = nn.Sequential(*[Block(in_dim=cin_dim, out_dim=cin_dim, mlp_hidden_ratio=dim_hidden_rate,
+                                            ) for i in range(block_num)])
+        self.downsample = DownSample2x(in_channel=cin_dim, out_channel=cin_dim * down_sample_rate)
+        self.last_stage = is_last_stage
+
+    def forward(self, x):
+        x = self.Blocks(x)
+        if self.last_stage is not True:
+            x = self.downsample(x)
+        return x
+
+
+# class cls_head(BaseBackbone):
+#     def __init__(self, class_num, feature_num=768):
+#         super(cls_head, self).__init__()
+#         self.class_num = class_num
+#         self.feature_num = feature_num
+#         self.fc = nn.Linear(feature_num, class_num)
+#         self.GAP = nn.AdaptiveAvgPool2d((1, 1))
+#
+#     def forward(self, x):
+#         x = x.transpose(1, 3)
+#         x = self.fc(x)
+#         x = x.transpose(1, 3)
+#         x = self.GAP(x)
+#         x = torch.squeeze(x)
+#         # x = x.max(1)[0]
+#         return x
+
+@BACKBONES.register_module()
+class vision_2dtransformer(BaseBackbone):
+    def __init__(self, stem_dim=96, stage_num=4, block_per_stage=[3, 3, 9, 3], dim_change_rate=[1, 2, 4, 8],
+                 state=[False, False, False, True]):
+        super(vision_2dtransformer, self).__init__()
+        self.STEM = Stem(out_dim=stem_dim)
+        self.stages = nn.Sequential(
+            *[Stage(block_num=i, cin_dim=j * stem_dim, is_last_stage=k) for i, j, k in
+              zip(block_per_stage, dim_change_rate, state)])
+        # self.head = cls_head(class_num=class_num)
+
+    def forward(self, x):
+        # x = self.head(self.stages(self.STEM(x)))
+        x = self.stages(self.STEM(x))
+        return x
+
+#
+# def vit2d_base_patch16_224(num_classes: int = 1000):
+#     """
+#     ViT-Base model (ViT-B/32) from original paper (https://arxiv.org/abs/2010.11929).
+#     ImageNet-1k weights @ 224x224, source https://github.com/google-research/vision_transformer.
+#     weights ported from official Google JAX impl:
+#     链接: https://pan.baidu.com/s/1hCv0U8pQomwAtHBYc4hmZg  密码: s5hl
+#     """
+#     model = vision_2dtransformer(
+#         class_num=num_classes)
+#     return model
