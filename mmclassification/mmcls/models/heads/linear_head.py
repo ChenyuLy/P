@@ -78,4 +78,5 @@ class LinearClsHead(ClsHead):
         x = self.pre_logits(x)
         cls_score = self.fc(x)
         losses = self.loss(cls_score, gt_label, **kwargs)
+        # print(losses)
         return losses

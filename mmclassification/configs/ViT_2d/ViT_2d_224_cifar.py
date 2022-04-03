@@ -1,17 +1,17 @@
 _base_ = [
     '../_base_/models/ViT_2db.py',
     '../_base_/datasets/cifar10_bs16.py',
-    '../_base_/schedules/cifar10_bs128.py',
+    '../_base_/schedules/cifar10_bs128_cosine.py',
     '../_base_/default_runtime.py'
 ]
 model = dict(
     type='ImageClassifier',
     backbone=dict(
         type='vision_2dtransformer',
-        img_size=32,
+        picturesize=32
+        # num_heads=6,
         # patch_size=4
     ),
-    neck=None,
     head=dict(
         type='LinearClsHead',
         num_classes=10,
