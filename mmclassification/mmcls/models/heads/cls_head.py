@@ -45,12 +45,8 @@ class ClsHead(BaseHead):
         num_samples = len(cls_score)
         losses = dict()
         # compute loss
-        # print(cls_score.shape)
-        # print(gt_label.shape)
         loss = self.compute_loss(
             cls_score, gt_label, avg_factor=num_samples, **kwargs)
-        # print(loss.shape)
-        # print(loss)
         if self.cal_acc:
             # compute accuracy
             acc = self.compute_accuracy(cls_score, gt_label)
@@ -60,7 +56,6 @@ class ClsHead(BaseHead):
                 for k, a in zip(self.topk, acc)
             }
         losses['loss'] = loss
-        # print(loss)
         return losses
 
     def forward_train(self, cls_score, gt_label, **kwargs):
